@@ -1,322 +1,216 @@
-from flask import Flask, render_template_string, request, jsonify
+from flask import Flask, request, jsonify, render_template_string
 from pymongo import MongoClient
 from datetime import datetime
 import os
 
 app = Flask(__name__)
 
-# MongoDB connection
-MONGO_URI = os.getenv("MONGO_URI", "your_mongodb_uri_here")
+# Replace with your actual MongoDB URI
+MONGO_URI = os.environ.get("MONGO_URI", "mongodb+srv://<username>:<password>@<cluster>.mongodb.net/<dbname>?retryWrites=true&w=majority")
 client = MongoClient(MONGO_URI)
 db = client["streakflow"]
 collection = db["entries"]
 
-# ---------------- HTML Template ----------------
-TEMPLATE = """
+HTML = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>StreakFlow</title>
-  <style>
-    body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      margin: 0;
-      padding: 1rem;
-      background-color: #0f0f0f;
-      color: #f5f5f5;
-    }
-    h1, h2 {
-      text-align: center;
-    }
-    .card {
-      background-color: #1a1a1a;
-      padding: 1rem;
-      border-radius: 12px;
-      margin-bottom: 1rem;
-      box-shadow: 0 0 8px rgba(255, 255, 255, 0.05);
-    }
-    .stat {
-      display: flex;
-      justify-content: space-between;
-      font-size: 1.2rem;
-    }
-    .btn {
-      display: inline-block;
-      width: 48%;
-      padding: 1rem;
-      margin-top: 0.5rem;
-      font-size: 1rem;
-      border: none;
-      border-radius: 8px;
-      cursor: pointer;
-    }
-    .btn-clean {
-      background-color: #28a745;
-      color: white;
-    }
-    .btn-relapsed {
-      background-color: #e07b39;
-      color: white;
-    }
-    select, textarea {
-      width: 100%;
-      padding: 0.6rem;
-      border-radius: 6px;
-      border: none;
-      margin-top: 0.5rem;
-      background: #2c2c2c;
-      color: white;
-    }
-    canvas {
-      width: 100% !important;
-      max-height: 200px;
-    }
-    #loadingBar {
-      display: none;
-      width: 100%;
-      background: #444;
-      margin-top: 10px;
-      border-radius: 4px;
-      overflow: hidden;
-    }
-    #loadingBar div {
-      width: 0%;
-      height: 10px;
-      background: #28a745;
-      animation: loading 1.5s linear forwards;
-    }
-    @keyframes loading {
-      to { width: 100%; }
-    }
-    #successPopup {
-      display: none;
-      position: fixed;
-      top: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: #28a745;
-      padding: 10px 20px;
-      border-radius: 8px;
-      color: white;
-      font-weight: bold;
-      z-index: 999;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <title>StreakFlow</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <style>
+        body {
+            margin: 0;
+            font-family: 'Segoe UI', sans-serif;
+            background-color: #0e0e0e;
+            color: #ffffff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        h1 {
+            color: #00ffe1;
+            margin-bottom: 10px;
+        }
+        .card {
+            background: #1e1e1e;
+            border-radius: 15px;
+            padding: 20px;
+            margin: 10px;
+            width: 90%;
+            max-width: 400px;
+            box-shadow: 0 0 10px #00ffe1;
+        }
+        label, input, select, button {
+            width: 100%;
+            margin-top: 10px;
+            font-size: 16px;
+        }
+        button {
+            background-color: #00ffe1;
+            border: none;
+            padding: 10px;
+            color: #000;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 8px;
+        }
+        .popup {
+            position: fixed;
+            top: 10%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: #00ffe1;
+            color: #000;
+            padding: 20px;
+            border-radius: 10px;
+            z-index: 9999;
+            display: none;
+        }
+        canvas {
+            width: 100% !important;
+            max-width: 400px;
+        }
+    </style>
 </head>
 <body>
-  <h1>StreakFlow</h1>
-
-  <div id="successPopup">Submission successful ✅</div>
-  <div class="card stat">
-    <div>
-      <strong>Current Streak:</strong>
-      <span id="currentStreak">0</span>
+    <h1>StreakFlow</h1>
+    <div class="card">
+        <form id="entryForm">
+            <label>Date:</label>
+            <input type="date" id="date" required><br>
+            <label>Mood:</label>
+            <select id="mood">
+                <option value="happy">😊 Happy</option>
+                <option value="neutral">😐 Neutral</option>
+                <option value="sad">😞 Sad</option>
+            </select><br>
+            <button type="submit">Log Entry</button>
+        </form>
     </div>
-    <div>
-      <strong>Longest Streak:</strong>
-      <span id="longestStreak">0</span>
+
+    <div class="card">
+        <h2>Current Streak: <span id="streakCount">0</span> days</h2>
     </div>
-  </div>
 
-  <div class="card">
-    <h2>Log Entry</h2>
-    <button class="btn btn-clean" onclick="logEntry('clean')">Stayed Clean</button>
-    <button class="btn btn-relapsed" onclick="logEntry('relapse')">Relapsed</button>
+    <div class="card">
+        <canvas id="progressChart"></canvas>
+    </div>
 
-    <label>Trigger</label>
-    <select id="trigger">
-      <option>Boredom</option>
-      <option>Stress</option>
-      <option>Loneliness</option>
-      <option>Habit</option>
-    </select>
+    <div class="card">
+        <canvas id="moodChart"></canvas>
+    </div>
 
-    <label>Mood</label>
-    <select id="mood">
-      <option>Positive</option>
-      <option>Neutral</option>
-      <option>Negative</option>
-    </select>
+    <div class="popup" id="popup">✅ Entry logged successfully!</div>
 
-    <label>Notes</label>
-    <textarea id="notes" rows="3"></textarea>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        async function updateUI() {
+            const res = await fetch("/data");
+            const data = await res.json();
+            document.getElementById("streakCount").textContent = data.streak;
 
-    <div id="loadingBar"><div></div></div>
-  </div>
+            const dates = data.logs.map(e => e.date);
+            const moods = data.logs.map(e => e.mood);
 
-  <div class="card">
-    <h2>Progress Chart</h2>
-    <canvas id="streakChart"></canvas>
-  </div>
+            // Progress Chart
+            new Chart(document.getElementById("progressChart"), {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: [{
+                        label: 'Activity Log',
+                        data: dates.map((_, i) => i + 1),
+                        borderColor: '#00ffe1',
+                        backgroundColor: 'rgba(0,255,225,0.2)',
+                        tension: 0.4
+                    }]
+                },
+                options: { responsive: true, plugins: { legend: { display: false } } }
+            });
 
-  <div class="card">
-    <h2>Mood Chart</h2>
-    <canvas id="moodChart"></canvas>
-  </div>
+            // Mood Chart
+            const moodCounts = { happy: 0, neutral: 0, sad: 0 };
+            moods.forEach(m => moodCounts[m]++);
+            new Chart(document.getElementById("moodChart"), {
+                type: 'bar',
+                data: {
+                    labels: ["😊", "😐", "😞"],
+                    datasets: [{
+                        label: "Mood Count",
+                        data: [moodCounts.happy, moodCounts.neutral, moodCounts.sad],
+                        backgroundColor: ['#0f0', '#ff0', '#f00']
+                    }]
+                },
+                options: { responsive: true }
+            });
+        }
 
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script>
-    let history = [];
+        document.getElementById("entryForm").addEventListener("submit", async function(e) {
+            e.preventDefault();
+            const date = document.getElementById("date").value;
+            const mood = document.getElementById("mood").value;
 
-    async function fetchData() {
-      const res = await fetch('/data');
-      const data = await res.json();
-      history = data.history;
-      document.getElementById('currentStreak').innerText = data.current_streak;
-      document.getElementById('longestStreak').innerText = data.longest_streak;
-      updateCharts();
-    }
+            const res = await fetch("/submit", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ date, mood })
+            });
 
-    async function logEntry(type) {
-      // Show loading
-      const loadingBar = document.getElementById('loadingBar');
-      loadingBar.style.display = 'block';
-      loadingBar.firstElementChild.style.width = '0%';
-      setTimeout(() => { loadingBar.firstElementChild.style.width = '100%'; }, 10);
+            if (res.ok) {
+                document.getElementById("popup").style.display = "block";
+                setTimeout(() => {
+                    document.getElementById("popup").style.display = "none";
+                }, 2000);
+                updateUI();
+            }
+        });
 
-      const entry = {
-        type: type,
-        trigger: document.getElementById('trigger').value,
-        mood: document.getElementById('mood').value,
-        notes: document.getElementById('notes').value
-      };
-
-      await fetch('/add', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(entry)
-      });
-
-      // Wait a bit before hiding loading
-      setTimeout(() => {
-        loadingBar.style.display = 'none';
-        showSuccess();
-        fetchData();
-      }, 1200);
-    }
-
-    function showSuccess() {
-      const popup = document.getElementById('successPopup');
-      popup.style.display = 'block';
-      setTimeout(() => {
-        popup.style.display = 'none';
-      }, 2000);
-    }
-
-    function updateCharts() {
-      const labels = history.slice(-7).map(e => new Date(e.date).toLocaleDateString());
-      const streakData = history.slice(-7).map((e, i) => i + 1);
-      const moodData = history.slice(-7).map(e => e.mood === 'Positive' ? 2 : e.mood === 'Neutral' ? 1 : 0);
-
-      streakChart.data.labels = labels;
-      streakChart.data.datasets[0].data = streakData;
-      streakChart.update();
-
-      moodChart.data.labels = labels;
-      moodChart.data.datasets[0].data = moodData;
-      moodChart.update();
-    }
-
-    const streakChart = new Chart(document.getElementById('streakChart'), {
-      type: 'line',
-      data: {
-        labels: [],
-        datasets: [{
-          label: 'Streak Days',
-          backgroundColor: '#007bff',
-          borderColor: '#007bff',
-          data: [],
-          fill: false
-        }]
-      },
-      options: { responsive: true, scales: { y: { beginAtZero: true } } }
-    });
-
-    const moodChart = new Chart(document.getElementById('moodChart'), {
-      type: 'bar',
-      data: {
-        labels: [],
-        datasets: [{
-          label: 'Mood Level',
-          backgroundColor: '#17a2b8',
-          data: []
-        }]
-      },
-      options: { responsive: true, scales: { y: { beginAtZero: true, max: 2 } } }
-    });
-
-    fetchData();
-  </script>
+        updateUI();
+    </script>
 </body>
 </html>
 """
 
-# ---------------- API Routes ----------------
+def calculate_streak(entries):
+    if not entries:
+        return 0
+    entries.sort(key=lambda x: x['date'], reverse=True)
+    streak = 1
+    for i in range(1, len(entries)):
+        diff = (entries[i-1]['date'] - entries[i]['date']).days
+        if diff == 1:
+            streak += 1
+        else:
+            break
+    return streak
 
-@app.route('/')
-def index():
-    return render_template_string(TEMPLATE)
+@app.route("/")
+def home():
+    return render_template_string(HTML)
 
-@app.route('/add', methods=['POST'])
-def add_entry():
+@app.route("/submit", methods=["POST"])
+def submit():
     data = request.get_json()
-    entry = {
-        "date": datetime.utcnow(),
-        "type": data.get("type"),
-        "trigger": data.get("trigger"),
-        "mood": data.get("mood"),
-        "notes": data.get("notes")
-    }
-    collection.insert_one(entry)
-    return jsonify({"status": "ok"})
+    date_obj = datetime.strptime(data["date"], "%Y-%m-%d")
+    mood = data["mood"]
+    collection.update_one(
+        {"date": date_obj},
+        {"$set": {"mood": mood}},
+        upsert=True
+    )
+    return jsonify({"status": "success"})
 
-@app.route('/data')
-def get_data():
-    history = list(collection.find().sort("date", 1))
-    current_streak, longest_streak = calculate_streaks(history)
-    return jsonify({
-        "history": [serialize(e) for e in history],
-        "current_streak": current_streak,
-        "longest_streak": longest_streak
-    })
+@app.route("/data")
+def data():
+    entries = list(collection.find({}, {"_id": 0}))
+    for entry in entries:
+        entry["date"] = entry["date"].strftime("%Y-%m-%d")
+    streak = calculate_streak([
+        {"date": datetime.strptime(e["date"], "%Y-%m-%d")} for e in entries
+    ])
+    return jsonify({"logs": entries, "streak": streak})
 
-def serialize(entry):
-    return {
-        "date": entry["date"].isoformat(),
-        "type": entry.get("type"),
-        "trigger": entry.get("trigger"),
-        "mood": entry.get("mood"),
-        "notes": entry.get("notes")
-    }
-
-def calculate_streaks(entries):
-    streak = 0
-    max_streak = 0
-    last_date = None
-
-    for entry in sorted(entries, key=lambda x: x["date"]):
-        if entry["type"] == "clean":
-            if last_date:
-                delta = (entry["date"].date() - last_date).days
-                if delta == 1:
-                    streak += 1
-                elif delta == 0:
-                    continue
-                else:
-                    streak = 1
-            else:
-                streak = 1
-            max_streak = max(max_streak, streak)
-            last_date = entry["date"].date()
-        elif entry["type"] == "relapse":
-            streak = 0
-            last_date = None
-
-    return streak, max_streak
-
-# ---------------- Run App ----------------
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     app.run(debug=True)
