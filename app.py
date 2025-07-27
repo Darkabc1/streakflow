@@ -5,168 +5,272 @@ import os
 
 app = Flask(__name__)
 
-# Connect to MongoDB Atlas (replace with your real connection string)
+# MongoDB connection (replace with your MongoDB Atlas URI or use .env)
 MONGO_URI = os.getenv("MONGO_URI", "your_mongodb_uri_here")
 client = MongoClient(MONGO_URI)
 db = client["streakflow"]
-collection = db["habits"]
+collection = db["entries"]
 
-# Embedded HTML + JS (modern, mobile portrait layout)
-UI_HTML = """
+# ---------------- HTML Template ----------------
+TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>StreakFlow Tracker</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StreakFlow</title>
   <style>
     body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
       margin: 0;
-      font-family: 'Segoe UI', sans-serif;
-      background: #0f0f0f;
-      color: #fff;
-      padding: 20px;
+      padding: 1rem;
+      background-color: #0f0f0f;
+      color: #f5f5f5;
     }
-    h1 {
-      font-size: 2rem;
-      text-align: center;
-      margin-top: 1rem;
-    }
-    .streak-box {
-      background: #1a1a1a;
-      padding: 15px;
-      border-radius: 15px;
-      margin: 20px 0;
+
+    h1, h2 {
       text-align: center;
     }
+
+    .card {
+      background-color: #1a1a1a;
+      padding: 1rem;
+      border-radius: 12px;
+      margin-bottom: 1rem;
+      box-shadow: 0 0 8px rgba(255, 255, 255, 0.05);
+    }
+
+    .stat {
+      display: flex;
+      justify-content: space-between;
+      font-size: 1.2rem;
+    }
+
     .btn {
-      background: #00e676;
-      color: black;
-      border: none;
-      padding: 12px 20px;
-      border-radius: 10px;
+      display: inline-block;
+      width: 48%;
+      padding: 1rem;
+      margin-top: 0.5rem;
       font-size: 1rem;
+      border: none;
+      border-radius: 8px;
       cursor: pointer;
     }
-    .btn:hover {
-      background: #00c853;
+
+    .btn-clean {
+      background-color: #28a745;
+      color: white;
     }
-    canvas {
-      background: #1f1f1f;
-      border-radius: 10px;
+
+    .btn-relapsed {
+      background-color: #e07b39;
+      color: white;
+    }
+
+    select, textarea {
       width: 100%;
-      height: 200px;
-      margin-top: 30px;
+      padding: 0.6rem;
+      border-radius: 6px;
+      border: none;
+      margin-top: 0.5rem;
+      background: #2c2c2c;
+      color: white;
+    }
+
+    canvas {
+      width: 100% !important;
+      max-height: 200px;
     }
   </style>
 </head>
 <body>
   <h1>StreakFlow</h1>
-  <div class="streak-box">
-    <p id="streakCount">Streak: 0 days</p>
-    <button class="btn" onclick="recordEntry()">Add Entry</button>
+
+  <div class="card stat">
+    <div>
+      <strong>Current Streak:</strong>
+      <span id="currentStreak">0</span>
+    </div>
+    <div>
+      <strong>Longest Streak:</strong>
+      <span id="longestStreak">0</span>
+    </div>
   </div>
 
-  <canvas id="progressChart"></canvas>
-  <canvas id="moodChart"></canvas>
+  <div class="card">
+    <h2>Log Entry</h2>
+    <button class="btn btn-clean" onclick="logEntry('clean')">Stayed Clean</button>
+    <button class="btn btn-relapsed" onclick="logEntry('relapse')">Relapsed</button>
+
+    <label>Trigger</label>
+    <select id="trigger">
+      <option>Boredom</option>
+      <option>Stress</option>
+      <option>Loneliness</option>
+      <option>Habit</option>
+    </select>
+
+    <label>Mood</label>
+    <select id="mood">
+      <option>Positive</option>
+      <option>Neutral</option>
+      <option>Negative</option>
+    </select>
+
+    <label>Notes</label>
+    <textarea id="notes" rows="3"></textarea>
+  </div>
+
+  <div class="card">
+    <h2>Progress Chart</h2>
+    <canvas id="streakChart"></canvas>
+  </div>
+
+  <div class="card">
+    <h2>Mood Chart</h2>
+    <canvas id="moodChart"></canvas>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script>
-    async function recordEntry() {
-      const response = await fetch('/add', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ mood: Math.floor(Math.random() * 5) + 1 })
-      });
-      const data = await response.json();
-      document.getElementById('streakCount').innerText = "Streak: " + data.streak + " days";
-      drawCharts(data.history);
-    }
+    let history = [];
 
-    function drawCharts(history) {
-      const labels = history.map(h => new Date(h.date).toLocaleDateString());
-      const moods = history.map(h => h.mood || 3);
-
-      const ctx1 = document.getElementById('progressChart').getContext('2d');
-      const ctx2 = document.getElementById('moodChart').getContext('2d');
-
-      new Chart(ctx1, {
-        type: 'line',
-        data: {
-          labels: labels,
-          datasets: [{
-            label: 'Daily Entries',
-            data: history.map((_, i) => i + 1),
-            borderColor: '#00e676',
-            backgroundColor: 'rgba(0, 230, 118, 0.2)',
-            fill: true,
-          }]
-        }
-      });
-
-      new Chart(ctx2, {
-        type: 'bar',
-        data: {
-          labels: labels,
-          datasets: [{
-            label: 'Mood Level',
-            data: moods,
-            backgroundColor: '#2979ff'
-          }]
-        }
-      });
-    }
-
-    // Load data on startup
-    window.onload = async () => {
+    async function fetchData() {
       const res = await fetch('/data');
       const data = await res.json();
-      document.getElementById('streakCount').innerText = "Streak: " + data.streak + " days";
-      drawCharts(data.history);
-    };
+      history = data.history;
+      document.getElementById('currentStreak').innerText = data.current_streak;
+      document.getElementById('longestStreak').innerText = data.longest_streak;
+      updateCharts();
+    }
+
+    async function logEntry(type) {
+      const entry = {
+        type: type,
+        trigger: document.getElementById('trigger').value,
+        mood: document.getElementById('mood').value,
+        notes: document.getElementById('notes').value
+      };
+      await fetch('/add', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(entry)
+      });
+      fetchData();
+    }
+
+    function updateCharts() {
+      const labels = history.slice(-7).map(e => new Date(e.date).toLocaleDateString());
+      const streakData = history.slice(-7).map((e, i) => i + 1);
+      const moodData = history.slice(-7).map(e => e.mood === 'Positive' ? 2 : e.mood === 'Neutral' ? 1 : 0);
+
+      streakChart.data.labels = labels;
+      streakChart.data.datasets[0].data = streakData;
+      streakChart.update();
+
+      moodChart.data.labels = labels;
+      moodChart.data.datasets[0].data = moodData;
+      moodChart.update();
+    }
+
+    const streakChart = new Chart(document.getElementById('streakChart'), {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [{
+          label: 'Streak Days',
+          backgroundColor: '#007bff',
+          borderColor: '#007bff',
+          data: [],
+          fill: false
+        }]
+      },
+      options: { responsive: true, scales: { y: { beginAtZero: true } } }
+    });
+
+    const moodChart = new Chart(document.getElementById('moodChart'), {
+      type: 'bar',
+      data: {
+        labels: [],
+        datasets: [{
+          label: 'Mood Level',
+          backgroundColor: '#17a2b8',
+          data: []
+        }]
+      },
+      options: { responsive: true, scales: { y: { beginAtZero: true, max: 2 } } }
+    });
+
+    fetchData();
   </script>
 </body>
 </html>
 """
 
+# ---------------- API Routes ----------------
+
 @app.route('/')
 def index():
-    return render_template_string(UI_HTML)
+    return render_template_string(TEMPLATE)
 
 @app.route('/add', methods=['POST'])
 def add_entry():
     data = request.get_json()
     entry = {
         "date": datetime.utcnow(),
-        "mood": data.get("mood", 3)
+        "type": data.get("type"),
+        "trigger": data.get("trigger"),
+        "mood": data.get("mood"),
+        "notes": data.get("notes")
     }
     collection.insert_one(entry)
-
-    history = list(collection.find().sort("date", 1))
-    streak = calculate_streak(history)
-    return jsonify({"streak": streak, "history": serialize(history)})
+    return jsonify({"status": "ok"})
 
 @app.route('/data')
 def get_data():
     history = list(collection.find().sort("date", 1))
-    streak = calculate_streak(history)
-    return jsonify({"streak": streak, "history": serialize(history)})
+    current_streak, longest_streak = calculate_streaks(history)
+    return jsonify({
+        "history": [serialize(e) for e in history],
+        "current_streak": current_streak,
+        "longest_streak": longest_streak
+    })
 
-def serialize(entries):
-    return [{"date": e["date"].isoformat(), "mood": e.get("mood", 3)} for e in entries]
+def serialize(entry):
+    return {
+        "date": entry["date"].isoformat(),
+        "type": entry.get("type"),
+        "trigger": entry.get("trigger"),
+        "mood": entry.get("mood"),
+        "notes": entry.get("notes")
+    }
 
-def calculate_streak(entries):
-    if not entries:
-        return 0
-    entries.sort(key=lambda x: x["date"])
-    streak = 1
-    for i in range(len(entries) - 1, 0, -1):
-        delta = (entries[i]["date"] - entries[i-1]["date"]).days
-        if delta == 1:
-            streak += 1
-        else:
-            break
-    return streak
+def calculate_streaks(entries):
+    streak = 0
+    max_streak = 0
+    last_date = None
+
+    for entry in sorted(entries, key=lambda x: x["date"]):
+        if entry["type"] == "clean":
+            if last_date:
+                delta = (entry["date"].date() - last_date).days
+                if delta == 1:
+                    streak += 1
+                elif delta == 0:
+                    continue
+                else:
+                    streak = 1
+            else:
+                streak = 1
+            max_streak = max(max_streak, streak)
+            last_date = entry["date"].date()
+        elif entry["type"] == "relapse":
+            streak = 0
+            last_date = None
+
+    return streak, max_streak
+
+# ---------------- Run App ----------------
 
 if __name__ == '__main__':
     app.run(debug=True)
