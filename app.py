@@ -246,6 +246,18 @@ def submit_entry():
     }
     sheets_result = send_to_google_sheets(sheets_data)
 
+    # Return combined result
+    if sheets_result.get("status") == "success":
+        d2_value = sheets_result.get("d2Value", "N/A")
+        return jsonify({
+            'message': f'{mongodb_msg} and Google Sheets. D2 Value: {d2_value}'
+        }), 201
+    else:
+        return jsonify({
+            'message': f'{mongodb_msg}. Google Sheets error: {sheets_result.get("message", "Unknown error")}'
+        }), 201
+
+
 @app.route("/data")
 def data():
     entries = list(collection.find({}, {"_id": 0}))
