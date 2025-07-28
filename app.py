@@ -107,99 +107,81 @@ HTML = """
   </style>
 </head>
 <body>
-  <h1>Streak-Flow</h1>
-  <div class="card">
+    <h2>🗓️ Daily Mood Tracker</h2>
     <form id="entryForm">
-      <label>Date:</label>
-      <input type="date" id="date" required><br>
-      <label>Mood:</label>
-      <select id="mood">
+      <label>Date:</label><br />
+      <input type="date" id="date" required /><br /><br />
+      <label>Mood:</label><br />
+      <select id="mood" required>
         <option value="happy">😊 Happy</option>
         <option value="neutral">😐 Neutral</option>
         <option value="sad">😞 Sad</option>
-      </select><br>
-      <button type="submit">Log Entry</button>
+      </select><br /><br />
+      <button type="submit">Submit</button>
     </form>
-  </div>
+    <div class="popup" id="popup">✔️ Entry Submitted</div>
 
-  <div class="card">
-    <h2>Current Streak: <span id="streakCount">0</span> days</h2>
-  </div>
+    <h3>Current Streak: <span id="streakCount">0</span> days</h3>
+    <canvas id="progressChart" width="300" height="200"></canvas>
+    <canvas id="moodChart" width="300" height="200"></canvas>
 
-  <div class="card">
-    <canvas id="progressChart"></canvas>
-  </div>
+    <script>
+      async function updateUI() {
+        google.script.run.withSuccessHandler(function (data) {
+          document.getElementById("streakCount").textContent = data.streak;
 
-  <div class="card">
-    <canvas id="moodChart"></canvas>
-  </div>
+          const dates = data.logs.map((e) => e.date);
+          const moods = data.logs.map((e) => e.mood);
 
-  <div class="popup" id="popup">✅ Entry logged successfully!</div>
+          const moodCounts = { happy: 0, neutral: 0, sad: 0 };
+          moods.forEach((m) => moodCounts[m]++);
 
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script>
-    async function updateUI() {
-      const res = await fetch("/data");
-      const data = await res.json();
-      document.getElementById("streakCount").textContent = data.streak;
+          new Chart(document.getElementById("progressChart"), {
+            type: "line",
+            data: {
+              labels: dates,
+              datasets: [{
+                label: "Progress",
+                data: dates.map((_, i) => i + 1),
+                borderColor: "#00ffe1",
+                backgroundColor: "rgba(0,255,225,0.2)",
+                tension: 0.4
+              }]
+            },
+            options: { responsive: true, plugins: { legend: { display: false } } }
+          });
 
-      const dates = data.logs.map(e => e.date);
-      const moods = data.logs.map(e => e.mood);
-
-      new Chart(document.getElementById("progressChart"), {
-        type: 'line',
-        data: {
-          labels: dates,
-          datasets: [{
-            label: 'Activity Log',
-            data: dates.map((_, i) => i + 1),
-            borderColor: '#00ffe1',
-            backgroundColor: 'rgba(0,255,225,0.2)',
-            tension: 0.4
-          }]
-        },
-        options: { responsive: true, plugins: { legend: { display: false } } }
-      });
-
-      const moodCounts = { happy: 0, neutral: 0, sad: 0 };
-      moods.forEach(m => moodCounts[m]++);
-      new Chart(document.getElementById("moodChart"), {
-        type: 'bar',
-        data: {
-          labels: ["😊", "😐", "😞"],
-          datasets: [{
-            label: "Mood Count",
-            data: [moodCounts.happy, moodCounts.neutral, moodCounts.sad],
-            backgroundColor: ['#0f0', '#ff0', '#f00']
-          }]
-        },
-        options: { responsive: true }
-      });
-    }
-
-    document.getElementById("entryForm").addEventListener("submit", async function(e) {
-      e.preventDefault();
-      const date = document.getElementById("date").value;
-      const mood = document.getElementById("mood").value;
-
-      const res = await fetch("/submit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date, mood })
-      });
-
-      if (res.ok) {
-        document.getElementById("popup").style.display = "block";
-        setTimeout(() => {
-          document.getElementById("popup").style.display = "none";
-        }, 2000);
-        updateUI();
+          new Chart(document.getElementById("moodChart"), {
+            type: "bar",
+            data: {
+              labels: ["😊", "😐", "😞"],
+              datasets: [{
+                label: "Mood Count",
+                data: [moodCounts.happy, moodCounts.neutral, moodCounts.sad],
+                backgroundColor: ["#0f0", "#ff0", "#f00"]
+              }]
+            },
+            options: { responsive: true }
+          });
+        }).getData();
       }
-    });
 
-    updateUI();
-  </script>
-</body>
+      document.getElementById("entryForm").addEventListener("submit", function (e) {
+        e.preventDefault();
+        const date = document.getElementById("date").value;
+        const mood = document.getElementById("mood").value;
+        google.script.run.withSuccessHandler(() => {
+          document.getElementById("popup").style.display = "block";
+          setTimeout(() => {
+            document.getElementById("popup").style.display = "none";
+          }, 2000);
+          updateUI();
+        }).submitData({ date, mood });
+      });
+
+      updateUI();
+    </script>
+  </body>
 </html>
 """
 
