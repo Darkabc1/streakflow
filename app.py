@@ -237,16 +237,16 @@ def submit_entry():
         return jsonify({"message": "Already submitted for today"}), 200
 
     collection.insert_one({"date": date_obj, "mood": mood})
-    return jsonify({"message": "Entry submitted successfully!"})
+    mongodb_msg = "Entry saved to MongoDB"
 
+    # Optional: Send to Google Sheets
     sheets_data = {
         "type": "mydata",
-        "date": date_obj,
+        "date": date_str,
         "mood": mood
     }
     sheets_result = send_to_google_sheets(sheets_data)
 
-    # Return combined result
     if sheets_result.get("status") == "success":
         d2_value = sheets_result.get("d2Value", "N/A")
         return jsonify({
@@ -256,6 +256,7 @@ def submit_entry():
         return jsonify({
             'message': f'{mongodb_msg}. Google Sheets error: {sheets_result.get("message", "Unknown error")}'
         }), 201
+
 
 
 @app.route("/data")
