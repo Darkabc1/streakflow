@@ -7,9 +7,42 @@ app = Flask(__name__)
 
 # Replace with your actual MongoDB URI
 MONGO_URI = os.environ.get("MONGO_URI", "mongodb+srv://<username>:<password>@<cluster>.mongodb.net/<dbname>?retryWrites=true&w=majority")
+
+if not MONGO_URI:
+    raise ValueError("MONGO_URI is not set. Please set it as an environment variable.")
+
+GOOGLE_SCRIPT_URL = os.getenv("GOOGLE_SCRIPT_URL")
+if not GOOGLE_SCRIPT_URL:
+    print("Warning: GOOGLE_SCRIPT_URL is not set. Data will only be saved to MongoDB.")
+
+
 client = MongoClient(MONGO_URI)
 db = client["streakflow"]
 collection = db["entries"]
+
+def send_to_google_sheets(data):
+    if not GOOGLE_SCRIPT_URL:
+        return {"status": "skipped", "message": "Google Script URL not configured"}
+    
+    try:
+        response = requests.post(
+            GOOGLE_SCRIPT_URL,
+            json=data,
+            timeout=10  # Set a timeout to prevent hanging
+        )
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return {
+                "status": "error",
+                "message": f"Google Sheets API error: HTTP {response.status_code}"
+            }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to send data to Google Sheets: {str(e)}"
+        }
 
 HTML = """
 <!DOCTYPE html>
@@ -205,6 +238,13 @@ def submit_entry():
 
     collection.insert_one({"date": date_obj, "mood": mood})
     return jsonify({"message": "Entry submitted successfully!"})
+
+    sheets_data = {
+        "type": "mydata",
+        "date": date_obj,
+        "mood": mood
+    }
+    sheets_result = send_to_google_sheets(sheets_data)
 
 @app.route("/data")
 def data():
