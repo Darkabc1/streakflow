@@ -105,7 +105,7 @@ HTML = """
   </style>
 </head>
 <body>
-  <h1>StreakFlow</h1>
+  <h1>Streak-Flow</h1>
   <div class="card">
     <form id="entryForm">
       <label>Date:</label>
