@@ -1067,5 +1067,220 @@ if __name__ == "__main__":
                   font: { size: 14 }
                 }
               },
-              tooltip: {
-                backgroundColor
+tooltip: {
+                backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                titleColor: '#ffffff',
+                bodyColor: '#ffffff',
+                borderColor: '#00ff88',
+                borderWidth: 1,
+                callbacks: {
+                  label: function(context) {
+                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                    const percentage = Math.round((context.parsed / total) * 100);
+                    return `${context.label}: ${context.parsed} (${percentage}%)`;
+                  }
+                }
+              }
+            }
+          }
+        });
+
+        // Render recent entries and insights
+        renderRecentEntries(data.logs);
+        renderInsights(generateInsights(data));
+
+      } catch (error) {
+        console.error('Error updating UI:', error);
+      }
+    }
+
+    document.getElementById("entryForm").addEventListener("submit", async function (e) {
+      e.preventDefault();
+      
+      const date = document.getElementById("date").value;
+      const mood = document.getElementById("mood").value;
+      
+      if (!date || !mood) {
+        alert('Please fill in all fields');
+        return;
+      }
+
+      // Show loading state
+      const submitText = document.getElementById("submitText");
+      const submitLoading = document.getElementById("submitLoading");
+      submitText.style.display = "none";
+      submitLoading.style.display = "inline-block";
+
+      try {
+        const response = await fetch('/submit', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ date, mood })
+        });
+
+        const result = await response.json();
+        
+        // Show success popup
+        const popup = document.getElementById("popup");
+        popup.classList.add("show");
+        setTimeout(() => {
+          popup.classList.remove("show");
+        }, 3000);
+        
+        // Reset form
+        document.getElementById("mood").value = "";
+        
+        // Update UI
+        await updateUI();
+        
+      } catch (error) {
+        console.error('Error submitting entry:', error);
+        alert('Error submitting entry. Please try again.');
+      } finally {
+        // Hide loading state
+        submitText.style.display = "inline";
+        submitLoading.style.display = "none";
+      }
+    });
+
+    // Initialize UI on page load
+    updateUI();
+  </script>
+</body>
+</html>
+"""
+
+def calculate_streak(entries):
+    if not entries:
+        return 0
+    
+    # Sort entries by date (newest first)
+    entries.sort(key=lambda x: datetime.strptime(x['date'], '%Y-%m-%d'), reverse=True)
+    
+    if len(entries) == 1:
+        return 1
+    
+    streak = 1
+    current_date = datetime.strptime(entries[0]['date'], '%Y-%m-%d')
+    
+    for i in range(1, len(entries)):
+        previous_date = datetime.strptime(entries[i]['date'], '%Y-%m-%d')
+        diff = (current_date - previous_date).days
+        
+        if diff == 1:
+            streak += 1
+            current_date = previous_date
+        elif diff == 0:
+            # Same date, skip
+            continue
+        else:
+            # Gap in streak
+            break
+    
+    return streak
+
+@app.route("/")
+def home():
+    return render_template_string(HTML)
+
+@app.route("/submit", methods=["POST"])
+def submit_entry():
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+            
+        mood = data.get("mood")
+        date_str = data.get("date")
+
+        if not mood or not date_str:
+            return jsonify({"error": "Missing mood or date"}), 400
+
+        # Convert date string to datetime for MongoDB
+        try:
+            date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+        except ValueError:
+            return jsonify({"error": "Invalid date format. Use YYYY-MM-DD"}), 400
+
+        # Check for duplicate entry for the same date in MongoDB
+        existing_entry = collection.find_one({"date": date_obj})
+        if existing_entry:
+            return jsonify({"message": "Entry already exists for this date"}), 200
+
+        # Insert new entry to MongoDB
+        collection.insert_one({"date": date_obj, "mood": mood})
+        mongodb_msg = "Entry saved to MongoDB"
+
+        # Send to Google Sheets
+        sheets_data = {
+            "type": "mydata",
+            "date": date_str,
+            "mood": mood
+        }
+        sheets_result = send_to_google_sheets(sheets_data)
+
+        if sheets_result.get("status") == "success":
+            d2_value = sheets_result.get("d2Value", "N/A")
+            return jsonify({
+                'message': f'{mongodb_msg} and Google Sheets. D2 Value: {d2_value}'
+            }), 201
+        else:
+            return jsonify({
+                'message': f'{mongodb_msg}. Google Sheets: {sheets_result.get("message", "Not configured")}'
+            }), 201
+
+    except Exception as e:
+        return jsonify({"error": f"Server error: {str(e)}"}), 500
+
+@app.route("/data")
+def data():
+    try:
+        # Try to fetch data from Google Sheets first
+        sheets_data = fetch_google_sheets_data()
+        
+        if sheets_data:
+            # Use Google Sheets data for calculations
+            entries = []
+            for row in sheets_data:
+                if len(row) >= 2:  # Ensure we have at least date and mood
+                    try:
+                        # Assuming Google Sheets data format: [date, mood, ...]
+                        date_str = row[0]
+                        mood_str = row[1]
+                        
+                        # Validate date format
+                        datetime.strptime(date_str, "%Y-%m-%d")
+                        
+                        entries.append({
+                            "date": date_str,
+                            "mood": mood_str
+                        })
+                    except (ValueError, IndexError):
+                        continue  # Skip invalid entries
+            
+            # Calculate streak using Google Sheets data
+            streak = calculate_streak(entries)
+            
+            return jsonify({"logs": entries, "streak": streak})
+        
+        else:
+            # Fallback to MongoDB data if Google Sheets is not available
+            entries = list(collection.find({}, {"_id": 0}).sort("date", 1))
+            
+            # Convert datetime objects to strings for JSON serialization
+            for entry in entries:
+                entry["date"] = entry["date"].strftime("%Y-%m-%d")
+            
+            # Calculate streak using MongoDB data
+            streak = calculate_streak(entries)
+            
+            return jsonify({"logs": entries, "streak": streak})
+    
+    except Exception as e:
+        return jsonify({"error": f"Server error: {str(e)}"})
+
+if __name__ == "__main__":
+    app.run(debug=True)
